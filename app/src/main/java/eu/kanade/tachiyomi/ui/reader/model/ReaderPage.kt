@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.model
 
+import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.model.Page
-import net.lingala.zip4j.ZipFile
-import net.lingala.zip4j.model.FileHeader
+import net.lingala.zip4j.model.LocalFileHeader
 import java.io.InputStream
 
 open class ReaderPage(
@@ -11,8 +11,8 @@ open class ReaderPage(
     imageUrl: String? = null,
     // SY -->
     /** zip4j inputStreams do not support mark() and release(), so they must be passed to ImageUtil */
-    var zip4jFile: ZipFile? = null,
-    var zip4jEntry: FileHeader? = null,
+    var zip4jFile: UniFile? = null,
+    var zip4jEntry: LocalFileHeader? = null,
     /** Value to check if this page is used to as if it was too wide */
     var shiftedPage: Boolean = false,
     /** Value to check if a page is can be doubled up, but can't because the next page is too wide */
@@ -20,7 +20,7 @@ open class ReaderPage(
     // SY <--
     var stream: (() -> InputStream)? = null,
 
-) : Page(index, url, imageUrl, null), ReaderItem {
+    ) : Page(index, url, imageUrl, null), ReaderItem {
 
     open lateinit var chapter: ReaderChapter
 

@@ -25,9 +25,11 @@ import androidx.core.graphics.green
 import androidx.core.graphics.red
 import androidx.exifinterface.media.ExifInterface
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.util.storage.CbzCrypto.getZipInputStream
 import logcat.LogPriority
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.FileHeader
+import net.lingala.zip4j.model.LocalFileHeader
 import tachiyomi.decoder.Format
 import tachiyomi.decoder.ImageDecoder
 import java.io.BufferedInputStream
@@ -136,8 +138,8 @@ object ImageUtil {
     fun isWideImage(
         imageStream: BufferedInputStream,
         // SY -->
-        zip4jFile: ZipFile?,
-        zip4jEntry: FileHeader?,
+        zip4jFile: UniFile?,
+        zip4jEntry: LocalFileHeader?,
         // SY <--
     ): Boolean {
         val options = extractImageOptions(
@@ -274,8 +276,8 @@ object ImageUtil {
     private fun isTallImage(
         imageStream: InputStream,
         // SY -->
-        zip4jFile: ZipFile?,
-        zip4jEntry: FileHeader?,
+        zip4jFile: UniFile?,
+        zip4jEntry: LocalFileHeader?,
         // SY <--
     ): Boolean {
         val options = extractImageOptions(
@@ -298,8 +300,8 @@ object ImageUtil {
         imageFile: UniFile,
         filenamePrefix: String,
         // SY -->
-        zip4jFile: ZipFile?,
-        zip4jEntry: FileHeader?,
+        zip4jFile: UniFile?,
+        zip4jEntry: LocalFileHeader?,
         // SY <--
     ): Boolean {
         if (isAnimatedAndSupported(imageFile.openInputStream()) || !isTallImage(
@@ -642,8 +644,8 @@ object ImageUtil {
     private fun extractImageOptions(
         imageStream: InputStream,
         // SY -->
-        zip4jFile: ZipFile?,
-        zip4jEntry: FileHeader?,
+        zip4jFile: UniFile?,
+        zip4jEntry: LocalFileHeader?,
         // SY <--
         resetAfterExtraction: Boolean = true,
     ): BitmapFactory.Options {
@@ -662,8 +664,8 @@ object ImageUtil {
     }
 
     // SY -->
-    private fun extractImageOptionsZip4j(zip4jFile: ZipFile?, zip4jEntry: FileHeader?): BitmapFactory.Options {
-        zip4jFile?.getInputStream(zip4jEntry).use { imageStream ->
+    private fun extractImageOptionsZip4j(zip4jFile: UniFile?, zip4jEntry: LocalFileHeader?): BitmapFactory.Options {
+        zip4jFile?.getZipInputStream(zip4jEntry!!.fileName).use { imageStream ->
             val imageBytes = imageStream?.readBytes()
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             imageBytes?.size?.let { BitmapFactory.decodeByteArray(imageBytes, 0, it, options) }

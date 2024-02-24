@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import logcat.LogPriority
-import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.exception.ZipException
 import net.lingala.zip4j.io.inputstream.ZipInputStream
 import net.lingala.zip4j.io.outputstream.ZipOutputStream
@@ -25,6 +24,7 @@ import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -152,27 +152,6 @@ object CbzCrypto {
         return decrypt(securityPreferences.sqlPassword().get(), ALIAS_SQL).toByteArray()
     }
 
-    /**
-     * Function that returns true when the supplied password
-     * can Successfully decrypt the supplied zip archive
-     * not very elegant but this is the solution recommended by the maintainer for checking passwords
-     * a real password check will likely be implemented in the future though
-     */
-    fun checkCbzPassword(zip4j: ZipFile, password: CharArray): Boolean {
-        try {
-            zip4j.setPassword(password)
-            zip4j.use { zip ->
-                zip.getInputStream(zip.fileHeaders.firstOrNull())
-            }
-            return true
-        } catch (e: Exception) {
-            logcat(LogPriority.WARN) {
-                "Wrong CBZ archive password for: ${zip4j.file.name} in: ${zip4j.file.parentFile?.name}"
-            }
-        }
-        return false
-    }
-
     fun isPasswordSet(): Boolean {
         return securityPreferences.cbzPassword().get().isNotEmpty()
     }
@@ -196,7 +175,7 @@ object CbzCrypto {
         }
     }
 
-    fun setZipParametersEncrypted(zipParameters: ZipParameters) {
+    private fun setZipParametersEncrypted(zipParameters: ZipParameters) {
         zipParameters.isEncryptFiles = true
 
         when (securityPreferences.encryptionType().get()) {
@@ -204,14 +183,17 @@ object CbzCrypto {
                 zipParameters.encryptionMethod = EncryptionMethod.AES
                 zipParameters.aesKeyStrength = AesKeyStrength.KEY_STRENGTH_256
             }
+
             SecurityPreferences.EncryptionType.AES_192 -> {
                 zipParameters.encryptionMethod = EncryptionMethod.AES
                 zipParameters.aesKeyStrength = AesKeyStrength.KEY_STRENGTH_192
             }
+
             SecurityPreferences.EncryptionType.AES_128 -> {
                 zipParameters.encryptionMethod = EncryptionMethod.AES
                 zipParameters.aesKeyStrength = AesKeyStrength.KEY_STRENGTH_128
             }
+
             SecurityPreferences.EncryptionType.ZIP_STANDARD -> {
                 zipParameters.encryptionMethod = EncryptionMethod.ZIP_STANDARD
             }
@@ -319,6 +301,25 @@ object CbzCrypto {
         }
         return null
     }
+
+    fun UniFile.getZipInputStreamUnsafe(filename: String, encrypted: Boolean = false): InputStream {
+        val zipInputStream = ZipInputStream(this.openInputStream())
+        var fileHeader: LocalFileHeader?
+
+        if (encrypted) zipInputStream.setPassword(getDecryptedPasswordCbz())
+        else {
+            if (this.isEncryptedZip()) zipInputStream.setPassword(getDecryptedPasswordCbz())
+        }
+
+        while (run {
+                fileHeader = zipInputStream.nextEntry
+                fileHeader != null
+            }) {
+            if (fileHeader?.fileName == filename) return zipInputStream
+        }
+        return zipInputStream
+    }
+
     fun UniFile.getCoverStreamFromZip(): InputStream? {
         val zipInputStream = ZipInputStream(this.openInputStream())
         var fileHeader: LocalFileHeader?
@@ -334,16 +335,11 @@ object CbzCrypto {
                 fileHeaderList.add(fileHeader)
             }
 
-            var coverHeader = fileHeaderList
+            val coverHeader = fileHeaderList
                 .mapNotNull { it }
                 .sortedWith { f1, f2 -> f1.fileName.compareToCaseInsensitiveNaturalOrder(f2.fileName) }
-                .find { !it.isDirectory && ImageUtil.isImage(it.fileName) }
+                .find { !it.isDirectory && ImageUtil.isImage(it.fileName) { getZipInputStreamUnsafe(it.fileName) } }
 
-
-            val coverStream = coverHeader?.fileName?.let { this.getZipInputStream(it) }
-            if (coverStream != null) {
-                if (!ImageUtil.isImage(coverHeader?.fileName) { coverStream }) coverHeader = null
-            }
             return coverHeader?.fileName?.let { getZipInputStream(it) }
 
         } catch (zipException: ZipException) {
@@ -352,6 +348,83 @@ object CbzCrypto {
                     "Wrong CBZ archive password for: ${this.name} in: ${this.parentFile?.name}"
                 }
                 return null
+            } else throw zipException
+        }
+    }
+
+    fun UniFile.getZipFileHeaders(): MutableList<LocalFileHeader?> {
+        val zipInputStream = ZipInputStream(this.openInputStream())
+        var fileHeader: LocalFileHeader?
+        val fileHeaderList: MutableList<LocalFileHeader?> = mutableListOf()
+
+        if (this.isEncryptedZip()) zipInputStream.setPassword(getDecryptedPasswordCbz())
+
+        try {
+            while (run {
+                    fileHeader = zipInputStream.nextEntry
+                    fileHeader != null
+                }) {
+                fileHeaderList.add(fileHeader)
+            }
+            return fileHeaderList
+
+        } catch (zipException: ZipException) {
+            if (zipException.type == ZipException.Type.WRONG_PASSWORD) {
+                logcat(LogPriority.WARN) {
+                    "Wrong CBZ archive password for: ${this.name} in: ${this.parentFile?.name}"
+                }
+                return mutableListOf()
+            } else throw zipException
+        }
+    }
+
+    fun UniFile.unzip(destination: File, onlyExtractImages: Boolean = false) {
+        var zipInputStream = ZipInputStream(this.openInputStream())
+        var fileHeader: LocalFileHeader?
+        val fileHeaderList: MutableList<LocalFileHeader?> = mutableListOf()
+        var encrypted = false
+
+        if (this.isEncryptedZip()) {
+            zipInputStream.setPassword(getDecryptedPasswordCbz())
+            encrypted = true
+        }
+
+        try {
+            while (run {
+                    fileHeader = zipInputStream.nextEntry
+                    fileHeader != null
+                }) {
+                fileHeaderList.add(fileHeader)
+            }
+
+            val images = fileHeaderList
+                .mapNotNull { it }
+                .filter { !it.isDirectory && ImageUtil.isImage(it.fileName) { getZipInputStreamUnsafe(it.fileName) } }
+
+            zipInputStream = ZipInputStream(this.openInputStream())
+            if (encrypted) {
+                zipInputStream.setPassword(getDecryptedPasswordCbz())
+            }
+
+            while (run {
+                    fileHeader = zipInputStream.nextEntry
+                    fileHeader != null
+                }) {
+                if (fileHeader in images) {
+                    val destFile = File("${destination.absolutePath}/${fileHeader?.fileName}")
+                    destFile.createNewFile()
+                    destFile.outputStream().use { output ->
+                        zipInputStream.use { input ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            }
+        } catch (zipException: ZipException) {
+            if (zipException.type == ZipException.Type.WRONG_PASSWORD) {
+                logcat(LogPriority.WARN) {
+                    "Wrong CBZ archive password for: ${this.name} in: ${this.parentFile?.name}"
+                }
             } else throw zipException
         }
     }

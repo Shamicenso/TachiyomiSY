@@ -127,7 +127,7 @@ class ChapterLoader(
                     source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                         when (format) {
                             is Format.Directory -> DirectoryPageLoader(format.file)
-                            is Format.Zip -> ZipPageLoader(tempFileManager.createTempFile(format.file))
+                            is Format.Zip -> ZipPageLoader(format.file)
                             is Format.Rar -> try {
                                 RarPageLoader(tempFileManager.createTempFile(format.file))
                             } catch (e: UnsupportedRarV5Exception) {
@@ -144,7 +144,7 @@ class ChapterLoader(
             source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                 when (format) {
                     is Format.Directory -> DirectoryPageLoader(format.file)
-                    is Format.Zip -> ZipPageLoader(tempFileManager.createTempFile(format.file))
+                    is Format.Zip -> ZipPageLoader(format.file)
                     is Format.Rar -> try {
                         RarPageLoader(tempFileManager.createTempFile(format.file))
                     } catch (e: UnsupportedRarV5Exception) {
